@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3a5f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>기업 뉴스 모니터</title>
+<style>
+  :root{
+    --bg:#f4f6fa;--card:#fff;--ink:#1b2430;--sub:#6b7686;--line:#e3e8ef;
+    --accent:#1f3a5f;--accent2:#2f6fed;--new:#e5484d;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#10151c;--card:#19212b;--ink:#e8edf3;--sub:#93a0b1;--line:#2a3441;--accent:#7aa7ff;--accent2:#7aa7ff;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;line-height:1.5}
+  header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:12px 16px 10px}
+  h1{font-size:18px;margin:0 0 10px}
+  .row{display:flex;gap:8px}
+  input[type=text]{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:16px}
+  button{border:0;border-radius:10px;padding:10px 14px;font-size:14px;cursor:pointer;background:var(--accent2);color:#fff}
+  button.ghost{background:transparent;color:var(--sub);border:1px solid var(--line)}
+  .chips{display:flex;gap:8px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .tab{flex:none;padding:5px 12px;border-radius:8px;font-size:13px;cursor:pointer;color:var(--sub);border:1px solid var(--line);white-space:nowrap}
+  .tab.on{color:var(--accent2);border-color:var(--accent2);font-weight:700}
+  .chip{flex:none;display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:14px;cursor:pointer;white-space:nowrap}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  @media (prefers-color-scheme:dark){.chip.on{color:#10151c}}
+  .chip .x{opacity:.6;font-size:12px;padding:0 2px}
+  .badge{background:var(--new);color:#fff;border-radius:999px;font-size:11px;padding:0 6px;line-height:18px}
+  .tools{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px;color:var(--sub);flex-wrap:wrap}
+  select{padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+  main{max-width:760px;margin:0 auto;padding:12px 16px 60px}
+  .item{display:block;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;text-decoration:none;color:inherit}
+  .item:hover{border-color:var(--accent2)}
+  .item .t{font-weight:600;font-size:15px}
+  .item .m{font-size:12px;color:var(--sub);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .item .co{color:var(--accent2);font-weight:600}
+  .sum{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px}
+  .sumh{font-weight:700;font-size:15px;margin-bottom:10px}
+  .sumh span{font-weight:400;font-size:12px;color:var(--sub);margin-left:6px}
+  .topic{padding:10px 0;border-top:1px solid var(--line)}
+  .topic:first-of-type{border-top:0;padding-top:0}
+  .tt{font-weight:700;font-size:14px;color:var(--accent2)}
+  .tt .badge2{background:var(--bg);color:var(--sub);border-radius:999px;font-size:11px;padding:1px 8px;margin-left:4px;font-weight:500}
+  .tl{display:block;margin-top:4px;font-size:14px;color:var(--ink);text-decoration:none}
+  .tm{font-size:12px;color:var(--sub);margin-top:2px}
+  .empty,.status{text-align:center;color:var(--sub);padding:40px 10px;font-size:14px}
+  .err{color:var(--new)}
+</style>
+</head>
+<body>
+<header>
+  <h1>📰 기업 뉴스 모니터</h1>
+  <div class="row">
+    <input id="q" type="text" placeholder="기업 추가 (별칭: 한수원=한국수력원자력 OR 한수원)" enterkeyhint="search">
+    <button id="add">추가</button>
+  </div>
+  <div class="chips" id="tabs"></div>
+  <div class="chips" id="chips"></div>
+  <div class="tools">
+    <span>기간</span>
+    <select id="period">
+      <option value="1d">1일</option>
+      <option value="7d" selected>7일</option>
+      <option value="30d">30일</option>
+      <option value="1y">1년</option>
+    </select>
+    <button class="ghost" id="refresh">새로고침</button>
+    <button class="ghost" id="notify">알림 켜기</button>
+    <span id="updated"></span>
+  </div>
+</header>
+<main><section id="brief"></section><section id="summary"></section><div id="list"></div></main>
+
+<script>
+const $ = s => document.querySelector(s);
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+
+/* ───── 기업 목록 (탭별 10곳). 이름 → 실제 검색어 ───── */
+const MY = '내 관심';
+const GROUPS = {
+  '한국 10대': ['삼성전자','SK','현대자동차','LG','포스코','롯데','한화','현대중공업','GS','신세계'],
+  '빅테크·AI': ['애플','마이크로소프트','구글','아마존','메타','테슬라','엔비디아','넷플릭스','오픈AI','팔란티어'],
+  '반도체·하드웨어': ['TSMC','브로드컴','AMD','인텔','마이크론','ASML','퀄컴','어플라이드머티어리얼즈','소니','델테크놀로지스'],
+  '자동차·에너지': ['도요타','폭스바겐','BYD','제너럴모터스','포드','CATL','엑슨모빌','셰브런','셸','사우디아람코'],
+  '금융·소비재': ['버크셔해서웨이','JP모건','골드만삭스','비자카드','코카콜라','나이키','월마트','코스트코','LVMH','네슬레'],
+  '중국·제약·항공': ['알리바바','텐센트','화웨이','샤오미','소프트뱅크','보잉','에어버스','일라이릴리','노보노디스크','화이자']
+};
+const ALIASES = {
+  'SK':'SK그룹 OR SK하이닉스 OR SK이노베이션',
+  '현대자동차':'현대자동차 OR 현대차',
+  'LG':'LG그룹 OR LG전자 OR LG화학',
+  '포스코':'포스코 OR 포스코홀딩스',
+  '롯데':'롯데그룹 OR 롯데케미칼 OR 롯데쇼핑',
+  '한화':'한화그룹 OR 한화에어로스페이스 OR 한화오션',
+  '현대중공업':'HD현대중공업 OR 현대중공업',
+  'GS':'GS그룹 OR GS칼텍스 OR GS리테일',
+  '신세계':'신세계 OR 이마트 OR 신세계백화점',
+  '애플':'애플 아이폰 OR 애플 주가',
+  '마이크로소프트':'마이크로소프트 OR MS 애저',
+  '구글':'구글 OR 알파벳',
+  '아마존':'아마존 OR AWS',
+  '메타':'메타플랫폼스 OR 저커버그',
+  '엔비디아':'엔비디아 OR NVIDIA',
+  '오픈AI':'오픈AI OR OpenAI',
+  'TSMC':'TSMC OR 대만 TSMC',
+  '어플라이드머티어리얼즈':'어플라이드머티어리얼즈 OR 어플라이드 머티리얼즈',
+  '델테크놀로지스':'델테크놀로지스 OR 델 테크놀로지스',
+  '제너럴모터스':'제너럴모터스 OR GM',
+  '포드':'포드 자동차 OR 포드모터',
+  '셸':'셸 OR 로열더치셸',
+  '사우디아람코':'사우디아람코 OR 아람코',
+  '버크셔해서웨이':'버크셔해서웨이 OR 워런 버핏',
+  'JP모건':'JP모건 OR 제이피모건',
+  '비자카드':'비자카드 OR Visa 결제'
+};
+let custom = store.get('aliases', {});
+const aliasOf = k => custom[k] || ALIASES[k] || k;
+
+/* ───── 2026-11-19 기준 핵심 이슈 스냅샷 (한국 10대). briefs.json이 있으면 그 내용으로 덮어씀 ───── */
+const BRIEF = {
+  '삼성전자':['3분기 영업이익 107.4조 원, 국내 기업 최초 분기 100조 원 돌파','현금 자산 214.8조 원으로 200조 원 첫 돌파','올해 주주환원 90~110조 원, 자사주 소각 규모는 1월 말 이사회에서 확정'],
+  'SK':['11/12~14 CEO 세미나: AI 풀스택 전략 점검','SK실트론 지분 매각, SKIET 합병 등 사업 재편 후속 과제','에너지 계열 경영진 교체, 석유화학 부진 대응'],
+  '현대자동차':['2030년 555만 대 판매·영업이익률 9% 목표','총주주환원율 35% 이상, 기존 자사주 전량 소각','유럽 전기차·북미 하이브리드 확대, FISITA 서밋 개최'],
+  'LG':['구광모 회장 주재 2027 사업 점검(투자 효율, 엔비디아·MS 협력)','㈜LG 3분기 지분법이익 11% 감소','그룹 차원의 AI 전환 가속 강조'],
+  '포스코':['11/17 포스코노조 상경투쟁 집회','11/11 GS와 AI 데이터센터 협력 MOU','리튬 상업 생산, 해외 제철 진출 본격화'],
+  '롯데':['신유열 사장 승진, 그룹 중장기 전략 총괄','롯데케미칼 2분기 흑자 유지, 비핵심 사업 효율화 주문','재계 순위 6위로 하락(한화가 5위)'],
+  '한화':['미 육군 자주포 사업 진입, 미 해군 상륙함 건조 계약','폴란드 천무 유도미사일 공장 착공','6월 대전사업장 사고 이후 비상 안전경영 가동'],
+  '현대중공업':['올해 노조 11차례 파업, 3분기 중대재해로 영업이익 약 500억 원 감소','11/6 아프리카 선사와 약 6,629억 원 수주','엔진기계 영업이익률 24.8%, AI 데이터센터 발전용 엔진 수요'],
+  'GS':['3분기 영업이익 1조 2,748억 원(+46.4%), 석유화학은 적자','포스코와 AI 데이터센터 협력 MOU','계열사 공시 누락 관련 공정위 과징금 추진 보도'],
+  '신세계':['3분기 역대 최대 영업이익(백화점·자회사 호조)','10월 기존점 매출 1% 증가에 그쳐 한투 목표가 하향','AI 파트너 변경(오픈AI→리플렉션AI) 과정 진통']
+};
+let briefDate = '2026-11-19';
+let META = {};
+// 서버(GitHub)가 매시간 갱신하는 briefs.json이 있으면 그 내용으로 덮어씀. 없으면 위의 기본 내용 유지
+async function loadBriefs(){
+  try{
+    const r = await fetch('briefs.json', {cache:'no-store'});
+    if(!r.ok) return;
+    const j = await r.json();
+    if(j && j.briefs){
+      Object.assign(BRIEF, j.briefs);
+      META = j.meta || {};
+      if(j.updated) briefDate = j.updated;
+      renderBrief();
+    }
+  }catch(e){}
+}
+loadBriefs();
+setInterval(loadBriefs, 10 * 60 * 1000);
+
+/* ───── 상태 ───── */
+let watch  = store.get('watch', []);
+let seen   = store.get('seen', {});
+let group  = store.get('group', '한국 10대');
+let active = store.get('active', '__all__');
+const TABS = [...Object.keys(GROUPS), MY];
+if(!TABS.includes(group)) group = '한국 10대';
+let cache = {}, stamp = {};
+$('#period').value = store.get('period', '7d');
+
+const list = () => group === MY ? watch : GROUPS[group];
+
+/* ───── 뉴스 가져오기 ───── */
+function rssUrl(kw){
+  const q = encodeURIComponent(aliasOf(kw) + ' when:' + $('#period').value);
+  return `https://news.google.com/rss/search?q=${q}&hl=ko&gl=KR&ceid=KR:ko`;
+}
+const clean = t => t.replace(/ - [^-]+$/, '').trim();
+const PROXIES = [
+  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  u => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
+  u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+  u => 'https://thingproxy.freeboard.io/fetch/' + u
+];
+let goodProxy = 0;
+async function withTimeout(url, ms){
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), ms);
+  try{ return await fetch(url, {signal: c.signal}); } finally { clearTimeout(t); }
+}
+function parseXml(text, kw){
+  const xml = new DOMParser().parseFromString(text, 'text/xml');
+  if(xml.querySelector('parsererror')) return [];
+  return [...xml.querySelectorAll('item')].map(i => {
+    const t = i.querySelector('title')?.textContent || '';
+    return {
+      title: clean(t), link: i.querySelector('link')?.textContent || '',
+      source: i.querySelector('source')?.textContent || (t.match(/ - ([^-]+)$/)||[])[1] || '',
+      date: new Date(i.querySelector('pubDate')?.textContent || Date.now()), kw
+    };
+  });
+}
+async function viaRss2json(kw){
+  const r = await withTimeout('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(rssUrl(kw)), 8000);
+  const j = await r.json();
+  if(j.status !== 'ok') throw new Error('rss2json 실패');
+  return j.items.map(i => ({
+    title: clean(i.title), link: i.link,
+    source: (i.title.match(/ - ([^-]+)$/)||[])[1] || '',
+    date: new Date((i.pubDate||'').replace(' ','T') + 'Z'), kw
+  }));
+}
+async function fetchNews(kw){
+  const url = rssUrl(kw);
+  const order = PROXIES.map((_, i) => (i + goodProxy) % PROXIES.length);
+  for(const i of order){
+    try{
+      const r = await withTimeout(PROXIES[i](url), 8000);
+      if(!r.ok) continue;
+      const items = parseXml(await r.text(), kw);
+      if(items.length){ goodProxy = i; return items; }
+    }catch(e){}
+  }
+  return viaRss2json(kw);
+}
+
+/* ───── 화면 ───── */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function ago(d){
+  const s = (Date.now() - d.getTime())/1000;
+  if(isNaN(s)) return '';
+  if(s < 3600) return Math.max(1, Math.floor(s/60)) + '분 전';
+  if(s < 86400) return Math.floor(s/3600) + '시간 전';
+  return Math.floor(s/86400) + '일 전';
+}
+const newCount = kw => (cache[kw]||[]).filter(a => !seen[a.link]).length;
+
+function renderTabs(){
+  $('#tabs').innerHTML = TABS.map(g => `<div class="tab ${g===group?'on':''}" data-g="${esc(g)}">${esc(g)}</div>`).join('');
+}
+function renderChips(){
+  const all = `<div class="chip ${active==='__all__'?'on':''}" data-k="__all__">전체</div>`;
+  const chips = list().map(k => {
+    const n = newCount(k);
+    return `<div class="chip ${active===k?'on':''}" data-k="${esc(k)}">${esc(k)}${n?` <span class="badge">${n}</span>`:''}${group===MY?`<span class="x" data-del="${esc(k)}">✕</span>`:''}</div>`;
+  }).join('');
+  $('#chips').innerHTML = all + chips;
+}
+function renderBrief(){
+  const box = $('#brief');
+  if(active === '__all__'){
+    const rows = list().filter(k => BRIEF[k] && BRIEF[k][0]).map(k => `<li><b>${esc(k)}</b> ${esc(BRIEF[k][0])}</li>`).join('');
+    box.innerHTML = rows ? `<div class="sum"><div class="sumh">📋 기업별 대표 이슈<span>기업을 누르면 3가지 이슈를 볼 수 있어요</span></div><ul style="margin:0;padding-left:18px;font-size:14px">${rows}</ul></div>` : '';
+    return;
+  }
+  const b = BRIEF[active];
+  if(!b){ box.innerHTML = ''; return; }
+  const m = META[active];
+  const label = m && m.summarized_at ? `자동 정리 ${m.summarized_at} · 새 소식이 없으면 유지` : `${briefDate} 기준 정리`;
+  box.innerHTML = `<div class="sum"><div class="sumh">📋 ${esc(active)} 핵심 이슈<span>${esc(label)}</span></div><ul style="margin:0;padding-left:18px;font-size:14px">${b.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+}
+function renderBriefOld(){
+  const box = $('#brief');
+  const b = BRIEF[active];
+  if(!b){ box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="sum"><div class="sumh">📋 ${esc(active)} 핵심 이슈<span>${esc(briefDate)} 기준 정리</span></div><ul style="margin:0;padding-left:18px;font-size:14px">${b.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+}
+
+const STOP = new Set(['단독','속보','종합','오늘','내일','올해','관련','대한','위해','통해','이후','전망','분석','논란','발표','기자','영상','포토','사진','결국','이번','지난','최근','우리','이제','있다','한다','했다','된다']);
+function renderSummary(items){
+  const box = $('#summary');
+  if(items.length < 4){ box.innerHTML = ''; return; }
+  const skip = new Set(list().flatMap(k => aliasOf(k).split(/\s+OR\s+|\s+/)).filter(Boolean));
+  const tok = t => [...new Set((t.match(/[가-힣A-Za-z0-9]{2,}/g) || [])
+    .map(w => w.length > 2 ? w.replace(/(에서|으로|까지|부터|은|는|이|가|을|를|의|에|도|와|과|만|로)$/, '') : w)
+    .filter(w => w.length >= 2 && !skip.has(w) && !STOP.has(w) && /[가-힣A-Za-z]/.test(w)))];
+  let pool = items.map(a => ({a, t: tok(a.title)}));
+  const topics = [];
+  while(topics.length < 3){
+    const df = {};
+    pool.forEach(p => p.t.forEach(w => df[w] = (df[w] || 0) + 1));
+    const best = Object.entries(df).filter(([, n]) => n >= 2)
+      .sort((x, y) => y[1] - x[1] || y[0].length - x[0].length)[0];
+    if(!best) break;
+    topics.push({word: best[0], arts: pool.filter(p => p.t.includes(best[0])).map(p => p.a)});
+    pool = pool.filter(p => !p.t.includes(best[0]));
+  }
+  if(!topics.length){ box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="sum"><div class="sumh">📌 최근 이슈 ${topics.length}가지<span>기사 제목 키워드 기준 자동 분류</span></div>` +
+    topics.map((t, i) => `<div class="topic">
+      <div class="tt">${i + 1}. ${esc(t.word)} <span class="badge2">기사 ${t.arts.length}건</span></div>
+      <a class="tl" href="${esc(t.arts[0].link)}" target="_blank" rel="noopener">${esc(t.arts[0].title)}</a>
+      <div class="tm">${esc(t.arts[0].source)} · ${ago(t.arts[0].date)}${t.arts.length > 1 ? ' 외 ' + (t.arts.length - 1) + '건' : ''}</div>
+    </div>`).join('') + '</div>';
+}
+
+function renderList(msg){
+  const box = $('#list');
+  if(group === MY && !watch.length){
+    box.innerHTML = '<div class="empty">위 입력칸에 기업이나 키워드를 넣어 추가해 보세요.<br>추가한 기업은 이 탭에 모여요.</div>';
+    $('#summary').innerHTML = ''; $('#brief').innerHTML = '';
+    return;
+  }
+  const kws = active === '__all__' ? list() : [active];
+  let items = kws.flatMap(k => cache[k] || []);
+  const dup = new Set();
+  items = items.filter(a => dup.has(a.link) ? false : dup.add(a.link)).sort((a,b) => b.date - a.date);
+  let html = msg ? `<div class="status ${msg.err?'err':''}">${esc(msg.text)}</div>` : '';
+  if(!items.length && !msg) html += '<div class="empty">표시할 기사가 없어요. 기간을 늘려 보세요.</div>';
+  html += items.map(a => `
+    <a class="item" href="${esc(a.link)}" target="_blank" rel="noopener" data-link="${esc(a.link)}">
+      <div class="t">${esc(a.title)}</div>
+      <div class="m">
+        <span class="co">${esc(a.kw)}</span>
+        <span>${esc(a.source)}</span>
+        <span>${ago(a.date)}</span>
+        ${seen[a.link] ? '' : '<span class="badge">NEW</span>'}
+      </div>
+    </a>`).join('');
+  box.innerHTML = html;
+  renderBrief();
+  renderSummary(items);
+}
+function renderAll(msg){ renderTabs(); renderChips(); renderList(msg); }
+
+/* ───── 새로고침: 지금 보는 탭의 기업만 불러옴 ───── */
+async function refresh(force){
+  const kws = list();
+  if(!kws.length){ renderAll(); return; }
+  const per = $('#period').value;
+  const need = kws.filter(k => force || !cache[k] || (Date.now() - (stamp[k + per] || 0) > 10 * 60 * 1000));
+  if(!need.length){ renderAll(); return; }
+  renderAll({text:'불러오는 중…'});
+  const prev = {};
+  need.forEach(k => prev[k] = new Set((cache[k] || []).map(a => a.link)));
+  let failed = 0;
+  for(let i = 0; i < need.length; i += 3){
+    await Promise.all(need.slice(i, i + 3).map(async k => {
+      try{ cache[k] = await fetchNews(k); stamp[k + per] = Date.now(); }catch(e){ failed++; }
+    }));
+  }
+  const fresh = need.filter(k => prev[k].size).flatMap(k => (cache[k] || []).filter(a => !prev[k].has(a.link)));
+  if(fresh.length && 'Notification' in window && Notification.permission === 'granted'){
+    try{ new Notification('새 뉴스 ' + fresh.length + '건', {body: fresh[0].title}); }catch(e){}
+  }
+  $('#updated').textContent = '업데이트 ' + new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+  renderAll(failed ? {text: failed + '개 기업을 불러오지 못했어요. 잠시 후 새로고침해 주세요.', err:true} : null);
+}
+
+/* ───── 이벤트 ───── */
+function addKw(){
+  let v = $('#q').value.trim();
+  if(v.includes('=')){
+    const [n, ...r] = v.split('=');
+    const qq = r.join('=').trim();
+    v = n.trim();
+    if(v && qq){ custom[v] = qq; store.set('aliases', custom); }
+  }
+  $('#q').value = '';
+  if(!v) return;
+  if(!watch.includes(v)){ watch.push(v); store.set('watch', watch); }
+  group = MY; active = v;
+  store.set('group', group); store.set('active', active);
+  delete stamp[v + $('#period').value];
+  refresh();
+}
+$('#add').onclick = addKw;
+$('#q').addEventListener('keydown', e => { if(e.key === 'Enter') addKw(); });
+$('#refresh').onclick = () => refresh(true);
+$('#period').onchange = () => { store.set('period', $('#period').value); refresh(); };
+$('#notify').onclick = async () => {
+  if(!('Notification' in window)) return alert('이 브라우저는 알림을 지원하지 않아요.');
+  const p = await Notification.requestPermission();
+  $('#notify').textContent = p === 'granted' ? '알림 켜짐' : '알림 꺼짐';
+};
+$('#tabs').onclick = e => {
+  const t = e.target.closest('.tab');
+  if(!t) return;
+  group = t.dataset.g; active = '__all__';
+  store.set('group', group); store.set('active', active);
+  refresh();
+};
+$('#chips').onclick = e => {
+  const del = e.target.dataset.del;
+  if(del){
+    watch = watch.filter(k => k !== del); delete cache[del];
+    store.set('watch', watch);
+    if(active === del){ active = '__all__'; store.set('active', active); }
+    renderAll(); return;
+  }
+  const chip = e.target.closest('.chip');
+  if(chip){ active = chip.dataset.k; store.set('active', active); renderChips(); renderList(); }
+};
+$('#list').onclick = e => {
+  const a = e.target.closest('.item');
+  if(a){ seen[a.dataset.link] = 1; store.set('seen', seen); setTimeout(() => { renderChips(); renderList(); }, 50); }
+};
+
+if('Notification' in window && Notification.permission === 'granted') $('#notify').textContent = '알림 켜짐';
+renderAll();
+refresh();
+setInterval(() => refresh(true), 15 * 60 * 1000);
+</script>
+</body>
+</html>
