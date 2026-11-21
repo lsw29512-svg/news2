@@ -1,0 +1,36 @@
+name: update-briefs
+
+on:
+  schedule:
+    - cron: "7 * * * *"   # 매시간 7분
+  workflow_dispatch:       # 수동 실행 버튼
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-briefs
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 뉴스 수집 및 이슈 정리
+        env:
+          MIN_NEW: "2"    # 새 기사가 이 개수 이상일 때만 다시 정리
+          WINDOW: "3d"    # 뉴스 검색 기간
+        run: python update_briefs.py
+
+      - name: 변경이 있으면 저장
+        run: |
+          git config user.name "news-bot"
+          git config user.email "news-bot@users.noreply.github.com"
+          git add briefs.json
+          git diff --cached --quiet || (git commit -m "update briefs" && git push)
