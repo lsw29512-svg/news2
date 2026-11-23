@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""매시간 60개 기업의 구글 뉴스를 모아 '최근 이슈 3가지'를 정리해 briefs.json에 저장한다. (AI·API 키 불필요)
+"""기업별 구글 뉴스를 모아 '최근 이슈 3가지'를 briefs.json에, 기사 목록을 articles.json에 저장한다. (AI·API 키 불필요)
 
+- 앱은 articles.json을 같은 사이트에서 읽기 때문에 무료 중계 서비스에 의존하지 않는다.
 - 기사 제목에서 자주 겹치는 단어로 기사를 묶고, 묶음마다 가장 최신 기사 제목을 대표 이슈로 쓴다.
 - 지난 정리 때보다 새 기사가 MIN_NEW개 미만이면 이전 내용을 그대로 유지한다.
 - 바뀐 내용이 하나도 없으면 briefs.json을 건드리지 않는다(불필요한 커밋 방지).
@@ -22,8 +23,10 @@ KST = timezone(timedelta(hours=9))
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 MIN_NEW = int(os.environ.get("MIN_NEW", "2"))   # 새 기사가 이 개수 이상일 때만 다시 정리
-WINDOW = os.environ.get("WINDOW", "3d")          # 뉴스 검색 기간
-TOP_N = int(os.environ.get("TOP_N", "20"))       # 기업당 분석할 기사 수
+RECENT_DAYS = int(os.environ.get("RECENT_DAYS", "3"))  # 이슈 정리에 쓰는 최근 기간(일)
+ARCHIVE = os.environ.get("ARCHIVE", "30d")       # 기사 목록으로 저장할 기간
+TOP_N = int(os.environ.get("TOP_N", "20"))       # 기업당 이슈 정리에 쓰는 기사 수
+KEEP_N = int(os.environ.get("KEEP_N", "60"))     # 기업당 저장할 기사 수
 WORKERS = int(os.environ.get("WORKERS", "3"))
 DELAY = float(os.environ.get("DELAY", "0.7"))   # 요청 사이 간격(초). 구글이 많이 요청한다고 막는 걸 피하려는 값
 MAX_LEN = 80                                     # 이슈 한 줄 최대 글자 수
@@ -54,7 +57,7 @@ def http(url, timeout=30):
 
 
 def fetch_news(query):
-    q = urllib.parse.quote(f"{query} when:{WINDOW}")
+    q = urllib.parse.quote(f"{query} when:{ARCHIVE}")
     url = f"https://news.google.com/rss/search?q={q}&hl=ko&gl=KR&ceid=KR:ko"
     root = ET.fromstring(http(url))
     items = []
@@ -69,7 +72,7 @@ def fetch_news(query):
         if title and link:
             items.append({"title": title, "source": source, "link": link, "ts": ts})
     items.sort(key=lambda x: x["ts"], reverse=True)
-    return items[:TOP_N]
+    return items[:KEEP_N]
 
 
 def tokens(title, skip):
@@ -140,41 +143,66 @@ def main():
         try:
             items = fetch_news(query)
         except Exception as e:  # noqa: BLE001
-            return name, old_issues, old_meta, f"뉴스 실패({e})"
+            return name, old_issues, old_meta, f"뉴스 실패({e})", None
         if not items:
-            return name, old_issues, old_meta, "기사 없음"
-        links = [i["link"] for i in items]
+            return name, old_issues, old_meta, "기사 없음", None
+        cutoff = time.time() - RECENT_DAYS * 86400
+        recent = [i for i in items if i["ts"] >= cutoff][:TOP_N]
+        if len(recent) < 3:          # 최근 기사가 너무 적으면 가장 최신 기사로 보충
+            recent = items[:10]
+        links = [i["link"] for i in recent]
         old_links = set(old_meta.get("links", []))
         new_count = len([l for l in links if l not in old_links])
         if old_issues and old_links and new_count < MIN_NEW:
-            return name, old_issues, old_meta, f"유지(새 기사 {new_count})"
-        issues = make_issues(query, items)
+            return name, old_issues, old_meta, f"유지(새 기사 {new_count})", items
+        issues = make_issues(query, recent)
         if not issues:
-            return name, old_issues, old_meta, "정리할 내용 없음"
+            return name, old_issues, old_meta, "정리할 내용 없음", items
         meta = {"links": links, "summarized_at": now_str()}
-        return name, issues, meta, f"갱신(새 기사 {new_count})"
+        return name, issues, meta, f"갱신(새 기사 {new_count})", items
 
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         results = list(ex.map(work, names))
 
-    briefs, meta, changed = {}, {}, 0
-    for name, issues, m, status in results:
+    apath = os.path.join(HERE, "articles.json")
+    try:
+        with open(apath, encoding="utf-8") as f:
+            prev_articles = json.load(f).get("articles", {})
+    except Exception:
+        prev_articles = {}
+
+    briefs, meta, articles, changed = {}, {}, {}, 0
+    for name, issues, m, status, items in results:
         print(f"{name}: {status}")
         if issues:
             briefs[name] = issues
             meta[name] = m
         if status.startswith("갱신"):
             changed += 1
+        if items:  # 새로 받았으면 교체, 실패하면 이전 목록 유지
+            articles[name] = [
+                {"t": i["title"], "s": i["source"], "l": i["link"], "d": int(i["ts"])} for i in items
+            ]
+        elif name in prev_articles:
+            articles[name] = prev_articles[name]
+
+    if articles != prev_articles:
+        with open(apath, "w", encoding="utf-8") as f:
+            json.dump({"updated": now_str(), "articles": articles}, f, ensure_ascii=False, separators=(",", ":"))
+            f.write("\n")
+        print(f"기사 목록 저장: {len(articles)}개 기업")
+    else:
+        print("기사 목록이 그대로라 articles.json을 두었습니다.")
 
     if changed == 0:
-        print("바뀐 내용이 없어 briefs.json을 그대로 둡니다.")
+        print("이슈가 바뀐 곳이 없어 briefs.json을 그대로 둡니다.")
         return 0
 
     out = {"updated": now_str(), "briefs": briefs, "meta": meta}
     with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
         f.write("\n")
-    print(f"{changed}개 기업을 갱신했습니다.")
+    print(f"{changed}개 기업의 이슈를 갱신했습니다.")
     return 0
 
 

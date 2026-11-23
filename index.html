@@ -6,7 +6,8 @@
 <meta name="theme-color" content="#1f3a5f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>기업 뉴스 모니터</title>
+<title>기업 Informer</title>
+<meta name="apple-mobile-web-app-title" content="기업 Informer">
 <style>
   :root{
     --bg:#f4f6fa;--card:#fff;--ink:#1b2430;--sub:#6b7686;--line:#e3e8ef;
@@ -84,7 +85,7 @@
 </head>
 <body>
 <header>
-  <h1>📰 기업 뉴스 모니터</h1>
+  <h1>📰 기업 Informer</h1>
   <div class="row">
     <input id="q" type="text" placeholder="기업 추가 (별칭: 한수원=한국수력원자력 OR 한수원)" enterkeyhint="search">
     <button id="add">추가</button>
@@ -97,7 +98,6 @@
       <option value="1d">1일</option>
       <option value="7d" selected>7일</option>
       <option value="30d">30일</option>
-      <option value="1y">1년</option>
     </select>
     <button class="ghost" id="refresh">새로고침</button>
     <button class="ghost" id="notify">알림 켜기</button>
@@ -232,7 +232,8 @@ let active = store.get('active', '__all__');
 const TABS = [...Object.keys(GROUPS), MY];
 if(!TABS.includes(group)) group = '한국 10대';
 let cache = {}, stamp = {};
-$('#period').value = store.get('period', '7d');
+$('#period').value = store.get('period', '7d') || '7d';
+if(!$('#period').value) $('#period').value = '30d';   // 예전에 고른 '1년'은 30일로
 
 const list = () => group === MY ? watch : GROUPS[group];
 
@@ -276,7 +277,27 @@ async function viaRss2json(kw){
     date: new Date((i.pubDate||'').replace(' ','T') + 'Z'), kw
   }));
 }
+/* 서버(GitHub)가 3시간마다 저장하는 기사 목록. 이걸 먼저 쓰고, 없는 기업(내 관심)만 중계 서비스로 가져옴 */
+let ARTICLES = null, ARTICLES_AT = '';
+async function loadArticles(){
+  try{
+    const r = await fetch('articles.json', {cache:'no-store'});
+    if(!r.ok) return;
+    const j = await r.json();
+    if(j && j.articles && Object.keys(j.articles).length){ ARTICLES = j.articles; ARTICLES_AT = j.updated || ''; }
+  }catch(e){}
+}
+const DAYS = {'1d':1, '7d':7, '30d':30};
+function fromServer(kw){
+  if(!ARTICLES || custom[kw] || !ARTICLES[kw]) return null;
+  const since = Date.now() - (DAYS[$('#period').value] || 30) * 86400000;
+  return ARTICLES[kw]
+    .filter(a => a.d * 1000 >= since)
+    .map(a => ({title:a.t, link:a.l, source:a.s, date:new Date(a.d * 1000), kw}));
+}
 async function fetchNews(kw){
+  const local = fromServer(kw);
+  if(local) return local;
   const url = rssUrl(kw);
   const order = PROXIES.map((_, i) => (i + goodProxy) % PROXIES.length);
   for(const i of order){
@@ -530,6 +551,8 @@ async function refresh(force, only){
   const myRun = ++runId;                       // 이전 새로고침은 여기서 중단됨
   if(!kws.length){ net = {state:'idle'}; setProgress(); renderAll(); return; }
   const per = $('#period').value;
+  if(force || !ARTICLES) await loadArticles();
+  if(myRun !== runId) return;
   const need = only ? only.filter(k => kws.includes(k))
     : kws.filter(k => force || !cache[k] || (Date.now() - (stamp[k + per] || 0) > 10 * 60 * 1000));
   if(!need.length){ net = {state:'idle'}; setProgress(); renderAll(); return; }
@@ -557,7 +580,9 @@ async function refresh(force, only){
   if(fresh.length && 'Notification' in window && Notification.permission === 'granted'){
     try{ new Notification('새 뉴스 ' + fresh.length + '건', {body: fresh[0].title}); }catch(e){}
   }
-  $('#updated').textContent = '업데이트 ' + new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+  $('#updated').textContent = list().some(k => ARTICLES && ARTICLES[k] && !custom[k]) && ARTICLES_AT
+    ? '기사 ' + ARTICLES_AT.slice(5) + ' 기준'
+    : '업데이트 ' + new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
   net = failedNames.length ? {state:'bad', names:failedNames} : {state:'ok', total:need.length};
   setProgress(); renderAll();
   if(net.state === 'ok') setTimeout(() => { if(myRun === runId && net.state === 'ok'){ net = {state:'idle'}; renderList(); } }, 3500);
@@ -618,7 +643,7 @@ $('#list').onclick = e => {
 if('Notification' in window && Notification.permission === 'granted') $('#notify').textContent = '알림 켜짐';
 renderAll();
 refresh();
-setInterval(() => refresh(true), 15 * 60 * 1000);
+setInterval(() => refresh(true), 30 * 60 * 1000);
 </script>
 </body>
 </html>
