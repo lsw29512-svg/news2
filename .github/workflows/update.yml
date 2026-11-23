@@ -2,8 +2,8 @@ name: update-briefs
 
 on:
   schedule:
-    - cron: "7 * * * *"
-  workflow_dispatch:
+    - cron: "7 */3 * * *"   # 3시간마다 7분
+  workflow_dispatch:       # 수동 실행 버튼
 
 permissions:
   contents: write
@@ -24,13 +24,14 @@ jobs:
 
       - name: 뉴스 수집 및 이슈 정리
         env:
-          MIN_NEW: "2"
-          WINDOW: "3d"
+          MIN_NEW: "2"    # 새 기사가 이 개수 이상일 때만 다시 정리
+          RECENT_DAYS: "3"  # 이슈 정리에 쓰는 최근 기간(일)
+          ARCHIVE: "30d"    # 기사 목록 저장 기간
         run: python update_briefs.py
 
       - name: 변경이 있으면 저장
         run: |
           git config user.name "news-bot"
           git config user.email "news-bot@users.noreply.github.com"
-          git add briefs.json
+          git add briefs.json articles.json
           git diff --cached --quiet || (git commit -m "update briefs" && git push)
