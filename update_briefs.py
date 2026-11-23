@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -23,7 +24,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MIN_NEW = int(os.environ.get("MIN_NEW", "2"))   # 새 기사가 이 개수 이상일 때만 다시 정리
 WINDOW = os.environ.get("WINDOW", "3d")          # 뉴스 검색 기간
 TOP_N = int(os.environ.get("TOP_N", "20"))       # 기업당 분석할 기사 수
-WORKERS = int(os.environ.get("WORKERS", "4"))
+WORKERS = int(os.environ.get("WORKERS", "3"))
+DELAY = float(os.environ.get("DELAY", "0.7"))   # 요청 사이 간격(초). 구글이 많이 요청한다고 막는 걸 피하려는 값
 MAX_LEN = 80                                     # 이슈 한 줄 최대 글자 수
 
 STOP = set("""단독 속보 종합 오늘 내일 올해 관련 대한 위해 통해 이후 전망 분석 논란 발표 기자 영상 포토 사진
@@ -38,9 +40,17 @@ def now_str():
 
 
 def http(url, timeout=30):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    """실패하면 간격을 늘려 최대 3번 시도한다."""
+    last = None
+    for attempt in range(3):
+        time.sleep(DELAY * (attempt + 1))
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except Exception as e:  # noqa: BLE001
+            last = e
+    raise last
 
 
 def fetch_news(query):
